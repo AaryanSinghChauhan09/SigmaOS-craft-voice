@@ -1,0 +1,16 @@
+[component]
+name = "SigmaOS-craft-voice"
+tier = 5
+stability = "scaffold"
+language = "rust"
+description = "Voice recording and speech integration for SigmaOS — capture, transcription, and audio note management"
+upstream = []
+
+[contract]
+provides = ["voice-recording", "transcription"]
+depends_on = []
+
+[maturity]
+status = "Scaffold"
+test_evidence = "Compiles"
+next_milestone = "Verification test suite"
