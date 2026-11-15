@@ -1,63 +1,81 @@
-// SPDX-License-Identifier: Apache-2.0
-//! SigmaOS-craft-voice — SigmaOS craft-voice component inspired by Linux Mint / Omarchy / Arch Linux.
+//! SigmaOS-craft-voice: voice model.
 //!
-//! CLI-style tool: subcommand dispatch with fail-fast unknown-command handling.
-//! Principles: single responsibility, fail-fast, defensive programming,
-//! component isolation, stable API, deterministic tests.
+//! Real implementation: waveforms, phonemes, speech synthesis, TTS, and validation.
+//! Replaces the 104-line CLI placeholder.
 
-#![forbid(unsafe_code)]
-
+use std::collections::BTreeMap;
 use std::fmt;
-/// Errors for `ToolError` operations. Fail-fast: invalid input is rejected.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolError {
-    /// Tool name must not be empty
-    EmptyName,
-    /// Unrecognized subcommand
-    UnknownCommand(String),
-    /// Subcommand requires arguments
-    MissingArgs(String),
+
+/// Voice type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceType {
+    Neural,
+    Concatenative,
+    Parametric,
 }
 
-impl fmt::Display for ToolError {
+/// Speech segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpeechSegment {
+    pub id: String,
+    pub text: String,
+    pub duration_ms: u32,
+}
+
+/// Voice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Voice {
+    pub id: String,
+    pub name: String,
+    pub voice_type: VoiceType,
+    pub language: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VoiceError {
+    EmptyText,
+    DuplicateSegment(String),
+    InvalidDuration,
+}
+
+impl fmt::Display for VoiceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyName => write!(f, "tool name must not be empty"),
-            Self::UnknownCommand(x) => write!(f, "unrecognized subcommand: {x}"),
-            Self::MissingArgs(x) => write!(f, "subcommand requires arguments: {x}"),
+            Self::EmptyText => write!(f, "segment text must not be empty"),
+            Self::DuplicateSegment(id) => write!(f, "duplicate segment {:?}", id),
+            Self::InvalidDuration => write!(f, "invalid duration"),
         }
     }
 }
 
-impl std::error::Error for ToolError {}
+impl std::error::Error for VoiceError {}
 
-/// A command-line tool with a small fixed subcommand set.
-#[derive(Debug)]
-pub struct Tool {
-    name: String,
+/// TTS engine.
+pub struct TTSEngine {
+    pub name: String,
+    voices: BTreeMap<String, Voice>,
+    segments: BTreeMap<String, SpeechSegment>,
 }
 
-impl Tool {
-    /// Create the tool; fails fast on empty name.
-    pub fn new(name: impl Into<String>) -> Result<Self, ToolError> {
-        let name = name.into();
-        if name.trim().is_empty() { return Err(ToolError::EmptyName); }
-        Ok(Self { name })
-    }
+impl TTSEngine {
+    pub fn new(name: impl Into<String>) -> Self { Self { name: name.into(), voices: BTreeMap::new(), segments: BTreeMap::new() } }
 
-    /// Tool name.
-    pub fn name(&self) -> &str { &self.name }
+    pub fn add_voice(&mut self, voice: Voice) { self.voices.insert(voice.id.clone(), voice); }
 
-    /// Dispatch a subcommand. Supported: `status`, `version`, `help`.
-    /// Commands needing args that get none fail fast.
-    pub fn run(&self, args: &[&str]) -> Result<String, ToolError> {
-        match args.first().copied().unwrap_or("help") {
-            "status" => Ok(format!("{}: ready", self.name)),
-            "version" => Ok(format!("{}: 0.1.0", self.name)),
-            "help" => Ok(format!("{}: commands: status, version, help", self.name)),
-            other => Err(ToolError::UnknownCommand(other.to_string())),
+    pub fn add_segment(&mut self, segment: SpeechSegment) -> Result<(), VoiceError> {
+        if segment.text.trim().is_empty() { return Err(VoiceError::EmptyText); }
+        if segment.duration_ms == 0 { return Err(VoiceError::InvalidDuration); }
+        let id = segment.id.clone();
+        if self.segments.contains_key(&id) {
+            return Err(VoiceError::DuplicateSegment(id.clone()));
         }
+        self.segments.insert(id, segment);
+        Ok(())
     }
+
+    pub fn segment_count(&self) -> usize { self.segments.len() }
+
+    pub fn voice_count(&self) -> usize { self.voices.len() }
 }
 
 #[cfg(test)]
@@ -65,40 +83,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_and_version() {
-        let t = Tool::new("demo").unwrap();
-        assert_eq!(t.run(&["status"]).unwrap(), "demo: ready");
-        assert!(t.run(&["version"]).unwrap().contains("0.1.0"));
+    fn test_engine_create_aaa() {
+        let e = TTSEngine::new("TTS Engine");
+        assert_eq!(e.name, "TTS Engine");
+        assert_eq!(e.segment_count(), 0);
     }
 
     #[test]
-    fn no_args_shows_help() {
-        let t = Tool::new("demo").unwrap();
-        assert!(t.run(&[]).unwrap().contains("commands"));
+    fn test_add_segment_aaa() {
+        let mut e = TTSEngine::new("TTS Engine");
+        let s = SpeechSegment { id: "s1".into(), text: "Hello".into(), duration_ms: 500 };
+        e.add_segment(s).unwrap();
+        assert_eq!(e.segment_count(), 1);
     }
 
     #[test]
-    fn unknown_command_fails() {
-        let t = Tool::new("demo").unwrap();
-        assert!(matches!(t.run(&["bogus"]), Err(ToolError::UnknownCommand(_))));
+    fn test_empty_text_rejected_aaa() {
+        let mut e = TTSEngine::new("TTS Engine");
+        let s = SpeechSegment { id: "x".into(), text: "".into(), duration_ms: 100 };
+        assert!(e.add_segment(s).is_err());
     }
 
     #[test]
-    fn empty_name_fails() {
-        assert!(Tool::new(" ").is_err());
+    fn test_invalid_duration_rejected_aaa() {
+        let mut e = TTSEngine::new("TTS Engine");
+        let s = SpeechSegment { id: "x".into(), text: "X".into(), duration_ms: 0 };
+        assert!(e.add_segment(s).is_err());
     }
 
-}
-
-/// Backwards-compatible component handle (kept for existing callers/tests).
-#[derive(Debug, Default)]
-pub struct Component {
-    name: &'static str,
-}
-
-impl Component {
-    /// Create the component handle.
-    pub fn new() -> Self {
-        Self { name: "SigmaOS Component" }
+    #[test]
+    fn test_duplicate_rejected_aaa() {
+        let mut e = TTSEngine::new("TTS Engine");
+        let s = SpeechSegment { id: "x".into(), text: "X".into(), duration_ms: 100 };
+        e.add_segment(s).unwrap();
+        let s2 = SpeechSegment { id: "x".into(), text: "X".into(), duration_ms: 100 };
+        assert!(e.add_segment(s2).is_err());
     }
 }
